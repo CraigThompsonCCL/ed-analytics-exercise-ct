@@ -6,10 +6,7 @@ import httpx
 
 router = APIRouter(prefix="/github", tags=["github"])
 
-newest_pr: GitHubPR | None = None
-total_pr_count: int = 0
 lodash_prs_list: list[GitHubPR] = []
-lodash_prs_dict: dict[int, GitHubPR] = {}
 
 
 @router.get("/quick_lodash_pr_count")
@@ -44,38 +41,32 @@ async def get_lodash_prs_quick() -> int:
 @cache(expire=60)
 async def get_lodash_prs() -> int:
     """Get the count of all lodash PRs."""
-    global newest_pr
-    global total_pr_count
-    former_newest_pr = newest_pr
-    newest_pr_replaced = False
+    global lodash_prs_list
+    prs_list_copy = lodash_prs_list[:]
+    former_newest_pr = prs_list_copy[0] if len(prs_list_copy) else None
 
     # Quick version - under conservative assumptions, will be called >99% of the time
-    new_pr_count = 0
     former_newest_pr_found = False
-    if newest_pr:
+    new_prs_list = []
+    if former_newest_pr:
         response = await async_client.get(
             "https://api.github.com/repos/lodash/lodash/pulls?per_page=5&state=all"
         )
         for raw_pr in response.json():
             pr = GitHubPR.model_validate(raw_pr)
-            # replace newest PR in database
-            if not newest_pr_replaced:
-                newest_pr_replaced = True
-                newest_pr = pr
             if pr == former_newest_pr:
                 former_newest_pr_found = True
                 break
             else:
-                new_pr_count += 1
-                lodash_prs_list.append(pr)
-                lodash_prs_dict[pr.id] = pr
+                new_prs_list.append(pr)
         if former_newest_pr_found:
-            total_pr_count += new_pr_count
-            return total_pr_count
+            # store data
+            lodash_prs_list = new_prs_list + prs_list_copy
+            return len(prs_list_copy) + len(new_prs_list)
 
     # Will likely only be called <1% of the time, including application startup
-    new_pr_count = 0
     former_newest_pr_found = False
+    new_prs_list = []
     next_page_url = (
         "https://api.github.com/repos/lodash/lodash/pulls?per_page=100&state=all"
     )
@@ -87,13 +78,12 @@ async def get_lodash_prs() -> int:
                 former_newest_pr_found = True
                 break
             else:
-                new_pr_count += 1
-                lodash_prs_list.append(pr)
-                lodash_prs_dict[pr.id] = pr
+                new_prs_list.append(pr)
         if not former_newest_pr_found:
             next_page_url = get_link(response, "next")
-    total_pr_count += new_pr_count
-    return total_pr_count
+    # store data
+    lodash_prs_list = new_prs_list + prs_list_copy
+    return len(prs_list_copy) + len(new_prs_list)
 
 
 def get_link(response: httpx.Response, link_type: str) -> str | None:
