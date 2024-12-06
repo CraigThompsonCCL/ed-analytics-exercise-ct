@@ -19,22 +19,8 @@ async def get_lodash_prs_quick() -> int:
     response = await async_client.get(
         "https://api.github.com/repos/lodash/lodash/pulls?per_page=1&state=all"
     )
-    link_text = get_link(response, "last")
+    link_text = get_header_link(response, "last")
     return int(link_text.split("=")[-1])
-
-
-# @app.get("/perf_get_prs")
-# def get_5_prs() -> tuple[float, float, float]:
-#     start = time.perf_counter()
-#     async_client.get(
-#         "https://api.github.com/repos/lodash/lodash/pulls?per_page=100&state=all"
-#     )
-#     hundred = time.perf_counter()
-#     async_client.get("https://api.github.com/repos/lodash/lodash/pulls?per_page=5&state=all")
-#     five = time.perf_counter()
-#     async_client.get("https://api.github.com/repos/lodash/lodash/pulls?per_page=2&state=all")
-#     two = time.perf_counter()
-#     return hundred - start, five - hundred, two - five
 
 
 @router.get("/lodash_pr_count")
@@ -43,56 +29,66 @@ async def get_lodash_prs() -> int:
     """Get the count of all lodash PRs."""
     global lodash_prs_list
     prs_list_copy = lodash_prs_list[:]
-    former_newest_pr = prs_list_copy[0] if len(prs_list_copy) else None
+    newest_pr = prs_list_copy[0] if len(prs_list_copy) else None
 
     # Quick version - under conservative assumptions, will be called >99% of the time
-    former_newest_pr_found = False
-    new_prs_list = []
-    if former_newest_pr:
-        response = await async_client.get(
-            "https://api.github.com/repos/lodash/lodash/pulls?per_page=5&state=all"
+    if newest_pr:
+        pr_found = False
+        new_prs_list, pr_found, _ = await find_newer_prs_in_page(
+            "https://api.github.com/repos/lodash/lodash/pulls?per_page=5&state=all",
+            newest_pr,
         )
-        for raw_pr in response.json():
-            pr = GitHubPR.model_validate(raw_pr)
-            if pr == former_newest_pr:
-                former_newest_pr_found = True
-                break
-            else:
-                new_prs_list.append(pr)
-        if former_newest_pr_found:
+        if pr_found:
             # store data
             lodash_prs_list = new_prs_list + prs_list_copy
             return len(prs_list_copy) + len(new_prs_list)
 
-    # Will likely only be called <1% of the time, including application startup
-    former_newest_pr_found = False
+    # Will be called the first time, then likely <1% of the time
+    pr_found = False
     new_prs_list = []
     next_page_url = (
         "https://api.github.com/repos/lodash/lodash/pulls?per_page=100&state=all"
     )
-    while next_page_url and not former_newest_pr_found:
-        response = await async_client.get(next_page_url)
-        for raw_pr in response.json():
-            pr = GitHubPR.model_validate(raw_pr)
-            if pr == former_newest_pr:
-                former_newest_pr_found = True
-                break
-            else:
-                new_prs_list.append(pr)
-        if not former_newest_pr_found:
-            next_page_url = get_link(response, "next")
+    while next_page_url and not pr_found:
+        new_prs_list_addition, pr_found, response = await find_newer_prs_in_page(
+            next_page_url, newest_pr
+        )
+        new_prs_list += new_prs_list_addition
+        if not pr_found:
+            next_page_url = get_header_link(response, "next")
+            print("next page url:", next_page_url)
     # store data
     lodash_prs_list = new_prs_list + prs_list_copy
     return len(prs_list_copy) + len(new_prs_list)
 
 
-def get_link(response: httpx.Response, link_type: str) -> str | None:
+async def find_newer_prs_in_page(
+    page_url: str, since_pr: GitHubPR | None
+) -> tuple[list[GitHubPR], bool, httpx.Response]:
+    """Given the URL of a page of PRs and a PR, returns a list of all PRs since that PR.
+    Assumes the page includes only PRs after or around the PR in question.
+    Also returns whether the PR was found and the HTTPX Response from the page"""
+    since_pr_found = False
+    new_prs_list = []
+    response = await async_client.get(page_url)
+    for raw_pr in response.json():
+        pr = GitHubPR.model_validate(raw_pr)
+        if pr == since_pr:
+            since_pr_found = True
+            break
+        else:
+            new_prs_list.append(pr)
+    return new_prs_list, since_pr_found, response
+
+
+def get_header_link(response: httpx.Response, link_type: str) -> str | None:
+    """Gets a link of link_type from the link header"""
     link_header = response.headers.get("link", {})
     links = link_header.split(",")
-    next_link = None
+    target_link = None
     for link in links:
         rel = link[-5:-1]
         if rel == link_type:
-            next_link = link.split(">")[0].strip()[1:]
+            target_link = link.split(">")[0].strip()[1:]
             break
-    return next_link
+    return target_link
