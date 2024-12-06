@@ -1,0 +1,18 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = ["setuptools>=75", "wheel"]
+
+[project]
+name = "education_analytics.github"
+version = "0.0.1"
+description = "Education Analytics Github API"
+readme = {file = "README.md", content-type = "text/markdown"}
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]",
+    "fastapi_cache2",
+    "httpx"
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
