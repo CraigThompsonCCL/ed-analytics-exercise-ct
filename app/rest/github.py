@@ -2,7 +2,7 @@ from fastapi import APIRouter
 from fastapi_cache.decorator import cache
 from ..models.github import GitHubPR
 from . import async_client
-import httpx
+from httpx import Response
 
 router = APIRouter(prefix="/github", tags=["github"])
 
@@ -64,13 +64,14 @@ async def get_lodash_prs() -> int:
 
 async def find_newer_prs_in_page(
     page_url: str, since_pr: GitHubPR | None
-) -> tuple[list[GitHubPR], bool, httpx.Response]:
+) -> tuple[list[GitHubPR], bool, Response]:
     """Given the URL of a page of PRs and a PR, returns a list of all PRs since that PR.
     Assumes the page includes only PRs after or around the PR in question.
     Also returns whether the PR was found and the HTTPX Response from the page"""
     since_pr_found = False
     new_prs_list = []
     response = await async_client.get(page_url)
+    response.raise_for_status()
     for raw_pr in response.json():
         pr = GitHubPR.model_validate(raw_pr)
         if pr == since_pr:
@@ -81,7 +82,7 @@ async def find_newer_prs_in_page(
     return new_prs_list, since_pr_found, response
 
 
-def get_header_link(response: httpx.Response, link_type: str) -> str | None:
+def get_header_link(response: Response, link_type: str) -> str | None:
     """Gets a link of link_type from the link header"""
     link_header = response.headers.get("link", {})
     links = link_header.split(",")
