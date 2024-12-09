@@ -3,6 +3,7 @@ FROM python:3.12.8-slim
 WORKDIR /app
 
 COPY ./pyproject.toml .
+COPY ./.env .
 RUN pip install .
 
 COPY ./app app
