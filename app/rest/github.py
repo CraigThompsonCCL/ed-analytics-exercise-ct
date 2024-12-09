@@ -1,8 +1,10 @@
+from typing import Any
 from fastapi import APIRouter
 from fastapi_cache.decorator import cache
 from ..models.github import GitHubPR
 from . import async_client
 from httpx import Response
+import asyncio
 
 router = APIRouter(prefix="/github", tags=["github"])
 
@@ -14,13 +16,48 @@ lodash_prs_list: list[GitHubPR] = []
 async def get_lodash_prs_quick() -> int:
     """
     A fast implementation to get the count of all lodash PRs.
-    Makes an unassured (but very likey) assumption about how GitHub will page this API.
+    Makes an unassured (but very likely) assumption about how GitHub will page this API.
+    Does not store count of PRs.
     """
     response = await async_client.get(
         "https://api.github.com/repos/lodash/lodash/pulls?per_page=1&state=all"
     )
     link_text = get_header_link(response, "last")
     return int(link_text.split("=")[-1])
+
+
+async def lodash_quick_backfill() -> int:
+    """
+    A fast implementation to get the count of all lodash PRs and store the PRs.
+    Makes an unassured (but very likely) assumption about how GitHub will page this API.
+    This is not used in the production application because the GitHub API
+    explicitly recommends against concurrent requests to avoid the secondary API rate limits.
+    """
+    global lodash_prs_list
+
+    async def process_page(url: str) -> list[GitHubPR]:
+        response = await async_client.get(url)
+        response.raise_for_status()
+        json_list: list[Any] = response.json()
+        prs_list = [GitHubPR.model_validate(raw_pr) for raw_pr in json_list]
+        return prs_list
+
+    response = await async_client.get(
+        "https://api.github.com/repos/lodash/lodash/pulls?per_page=1&state=all"
+    )
+    link_text = get_header_link(response, "last")
+    pr_count = int(link_text.split("=")[-1])
+    num_pages = pr_count // 100 + 1
+    urls = [
+        f"https://api.github.com/repos/lodash/lodash/pulls?per_page=100&state=all&page={i}"
+        for i in range(1, num_pages + 1)
+    ]
+    tasks = [process_page(url) for url in urls]
+    pr_lists = await asyncio.gather(*tasks)
+    all_prs_list = [pr for pr_list in pr_lists for pr in pr_list]
+    # store data
+    lodash_prs_list = all_prs_list
+    return len(all_prs_list)
 
 
 @router.get("/lodash_pr_count")
@@ -42,6 +79,8 @@ async def get_lodash_prs() -> int:
             # store data
             lodash_prs_list = new_prs_list + prs_list_copy
             return len(prs_list_copy) + len(new_prs_list)
+    # else:
+    #     return await lodash_quick_backfill()
 
     # Will be called the first time, then likely <1% of the time
     pr_found = False
@@ -56,7 +95,6 @@ async def get_lodash_prs() -> int:
         new_prs_list += new_prs_list_addition
         if not pr_found:
             next_page_url = get_header_link(response, "next")
-            print("next page url:", next_page_url)
     # store data
     lodash_prs_list = new_prs_list + prs_list_copy
     return len(prs_list_copy) + len(new_prs_list)
