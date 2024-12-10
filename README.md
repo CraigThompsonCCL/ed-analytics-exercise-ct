@@ -1,7 +1,7 @@
 ## Quickstart
 
 - Make sure you have [Docker](https://docs.docker.com/get-started/get-docker/) installed.
-- From within the root folder, run
+- From within the root directory, run
 
 ```shell
 docker compose up
@@ -14,13 +14,25 @@ After the application builds, you will be able to view the application at `http:
 
 ## Development
 
-After cloning, install dependencies with
+Make sure you have [Python 3.12](https://www.python.org/downloads/release/python-3125/) or greater installed.
+
+Clone the repo and navigate to the root directory.
+
+Create and activate a virtual environment with
+
+```shell
+pip install setuptools
+python -m venv .venv
+source .venv/bin/activate
+```
+
+Install dependencies with
 
 ```shell
 pip install .
 ```
 
-You can start a dev server with
+Start the dev server with
 
 ```shell
 fastapi dev app/main.py
