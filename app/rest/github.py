@@ -82,7 +82,7 @@ async def get_lodash_prs() -> int:
     # else:
     #     return await lodash_quick_backfill()
 
-    # Will be called the first time, then likely <1% of the time
+    # Will be called on startup, then likely <1% of the time
     pr_found = False
     new_prs_list = []
     next_page_url = (
